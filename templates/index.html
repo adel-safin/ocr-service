@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCR Сервис - Обработка документов</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 60px;
+            text-align: center;
+            background: #f8f9ff;
+            transition: all 0.3s;
+            cursor: pointer;
+            margin-bottom: 30px;
+        }
+        
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+        
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8ebff;
+            transform: scale(1.02);
+        }
+        
+        .upload-icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+        }
+        
+        .upload-text {
+            font-size: 1.3em;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .upload-hint {
+            color: #666;
+            font-size: 0.9em;
+        }
+        
+        input[type="file"] {
+            display: none;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        input[type="text"], select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+        
+        input[type="text"]:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.1em;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            font-weight: 600;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .results {
+            margin-top: 40px;
+            display: none;
+        }
+        
+        .results.show {
+            display: block;
+        }
+        
+        .result-section {
+            background: #f8f9ff;
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+        
+        .result-section h3 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.5em;
+        }
+        
+        .quality-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            margin: 5px;
+        }
+        
+        .quality-high {
+            background: #4caf50;
+            color: white;
+        }
+        
+        .quality-medium {
+            background: #ff9800;
+            color: white;
+        }
+        
+        .quality-low {
+            background: #f44336;
+            color: white;
+        }
+        
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        
+        .warning-title {
+            font-weight: 600;
+            color: #856404;
+            margin-bottom: 5px;
+        }
+        
+        .warning-text {
+            color: #856404;
+        }
+        
+        .area-info {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        
+        .area-coords {
+            font-family: monospace;
+            background: white;
+            padding: 8px;
+            border-radius: 5px;
+            margin-top: 8px;
+            font-size: 0.9em;
+        }
+        
+        .text-output {
+            background: #f5f5f5;
+            border-radius: 8px;
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+        
+        .loading.show {
+            display: block;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .file-info {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .file-info strong {
+            color: #2e7d32;
+        }
+        
+        .corrections-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .corrections-list li {
+            background: white;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+            border-left: 3px solid #667eea;
+        }
+        
+        .corrections-list .from {
+            color: #f44336;
+            text-decoration: line-through;
+        }
+        
+        .corrections-list .to {
+            color: #4caf50;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 OCR Сервис</h1>
+            <p>Обработка документов с распознаванием текста и автокоррекцией</p>
+        </div>
+        
+        <div class="content">
+            <form id="uploadForm">
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📄</div>
+                    <div class="upload-text">Перетащите файл сюда или нажмите для выбора</div>
+                    <div class="upload-hint">Поддерживаются: PDF, JPG, PNG, BMP</div>
+                    <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.bmp" required>
+                </div>
+                
+                <div class="file-info" id="fileInfo" style="display: none;">
+                    <strong>Выбранный файл:</strong> <span id="fileName"></span><br>
+                    <strong>Размер:</strong> <span id="fileSize"></span>
+                </div>
+                
+                <div class="form-group">
+                    <label for="template">Тип документа (опционально):</label>
+                    <select id="template">
+                        <option value="">Не указан</option>
+                        <option value="certificate">Сертификат</option>
+                        <option value="act_aosr">Акт АОСР</option>
+                        <option value="act_vneshniy">Акт внешнего осмотра</option>
+                        <option value="act_vhodnoy">Акт входного контроля</option>
+                        <option value="passport">Паспорт</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="requiredFields">Обязательные поля (через запятую, опционально):</label>
+                    <input type="text" id="requiredFields" placeholder="например: ogrn, inn, date">
+                </div>
+                
+                <button type="submit" class="btn" id="submitBtn">Обработать документ</button>
+            </form>
+            
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Обработка документа...</p>
+            </div>
+            
+            <div class="results" id="results">
+                <div class="result-section">
+                    <h3>📊 Качество обработки</h3>
+                    <div id="qualityInfo"></div>
+                </div>
+                
+                <div class="result-section" id="warningsSection" style="display: none;">
+                    <h3>⚠️ Предупреждения</h3>
+                    <div id="warningsInfo"></div>
+                </div>
+                
+                <div class="result-section" id="areasSection" style="display: none;">
+                    <h3>📍 Выделяемые области</h3>
+                    <div id="areasInfo"></div>
+                </div>
+                
+                <div class="result-section">
+                    <h3>✏️ Применённые исправления</h3>
+                    <ul class="corrections-list" id="correctionsList"></ul>
+                </div>
+                
+                <div class="result-section">
+                    <h3>📝 Распознанный текст</h3>
+                    <div class="text-output" id="textOutput"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const fileSize = document.getElementById('fileSize');
+        const uploadForm = document.getElementById('uploadForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const loading = document.getElementById('loading');
+        const results = document.getElementById('results');
+        
+        // Обработка drag & drop
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+                handleFileSelect(files[0]);
+            }
+        });
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+        
+        function handleFileSelect(file) {
+            fileName.textContent = file.name;
+            fileSize.textContent = formatFileSize(file.size);
+            fileInfo.style.display = 'block';
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+        
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            
+            const template = document.getElementById('template').value;
+            if (template) {
+                formData.append('template', template);
+            }
+            
+            const requiredFields = document.getElementById('requiredFields').value;
+            if (requiredFields) {
+                formData.append('required_fields', requiredFields);
+            }
+            
+            submitBtn.disabled = true;
+            loading.classList.add('show');
+            results.classList.remove('show');
+            
+            try {
+                const response = await fetch('/api/process', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`Ошибка: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                displayResults(data);
+            } catch (error) {
+                alert('Ошибка при обработке: ' + error.message);
+            } finally {
+                submitBtn.disabled = false;
+                loading.classList.remove('show');
+            }
+        });
+        
+        function displayResults(data) {
+            // Качество
+            const quality = data.quality_report.overall_quality;
+            const qualityClass = quality >= 0.8 ? 'quality-high' : quality >= 0.6 ? 'quality-medium' : 'quality-low';
+            const qualityText = (quality * 100).toFixed(2) + '%';
+            
+            document.getElementById('qualityInfo').innerHTML = `
+                <div class="quality-badge ${qualityClass}">Общее качество: ${qualityText}</div>
+                <div class="quality-badge ${qualityClass}">Уверенность OCR: ${(data.quality_report.ocr_confidence * 100).toFixed(2)}%</div>
+                <p style="margin-top: 15px;">
+                    <strong>Всего страниц:</strong> ${data.total_pages || 1}<br>
+                    <strong>Исправлений:</strong> ${data.corrections_applied?.length || 0}
+                </p>
+            `;
+            
+            // Предупреждения
+            const warnings = data.quality_report.warnings || [];
+            const issues = data.quality_report.issues || [];
+            const handwrittenAreas = data.quality_report.handwritten_areas || [];
+            
+            let warningsHtml = '';
+            
+            if (warnings.length > 0) {
+                warnings.forEach(warning => {
+                    warningsHtml += `<div class="warning">
+                        <div class="warning-title">⚠️ Предупреждение</div>
+                        <div class="warning-text">${warning}</div>
+                    </div>`;
+                });
+            }
+            
+            if (issues.length > 0) {
+                issues.forEach(issue => {
+                    warningsHtml += `<div class="warning">
+                        <div class="warning-title">⚠️ ${issue.type}</div>
+                        <div class="warning-text">${issue.message}</div>
+                    </div>`;
+                });
+            }
+            
+            if (handwrittenAreas.length > 0) {
+                warningsHtml += `<div class="warning">
+                    <div class="warning-title">✍️ Рукописный текст</div>
+                    <div class="warning-text">Обнаружено ${handwrittenAreas.length} областей с возможным рукописным текстом - перепроверьте</div>
+                </div>`;
+            }
+            
+            if (warningsHtml) {
+                document.getElementById('warningsInfo').innerHTML = warningsHtml;
+                document.getElementById('warningsSection').style.display = 'block';
+            } else {
+                document.getElementById('warningsSection').style.display = 'none';
+            }
+            
+            // Выделяемые области
+            const textRegions = data.quality_report.text_regions || [];
+            let areasHtml = '';
+            
+            if (textRegions.length > 0) {
+                areasHtml += `<p><strong>Всего областей текста:</strong> ${textRegions.length}</p>`;
+                
+                // Показываем первые 10 областей
+                const regionsToShow = textRegions.slice(0, 10);
+                regionsToShow.forEach((region, index) => {
+                    const bbox = region.bbox || {};
+                    areasHtml += `
+                        <div class="area-info">
+                            <strong>Область ${index + 1}:</strong> "${region.text.substring(0, 50)}${region.text.length > 50 ? '...' : ''}"
+                            <div class="area-coords">
+                                <strong>Координаты:</strong><br>
+                                X: ${bbox.x?.toFixed(0) || bbox.x1?.toFixed(0) || 'N/A'}, 
+                                Y: ${bbox.y?.toFixed(0) || bbox.y1?.toFixed(0) || 'N/A'}<br>
+                                Ширина: ${bbox.width?.toFixed(0) || 'N/A'}, 
+                                Высота: ${bbox.height?.toFixed(0) || 'N/A'}<br>
+                                Уверенность: ${(region.confidence * 100).toFixed(2)}%
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                if (textRegions.length > 10) {
+                    areasHtml += `<p style="margin-top: 10px; color: #666;">... и ещё ${textRegions.length - 10} областей</p>`;
+                }
+            }
+            
+            if (handwrittenAreas.length > 0) {
+                handwrittenAreas.forEach((area, index) => {
+                    const bbox = area.area || {};
+                    areasHtml += `
+                        <div class="area-info" style="border-left-color: #ff9800;">
+                            <strong>⚠️ Проблемная область ${index + 1} (рукописный текст):</strong> "${area.text.substring(0, 50)}${area.text.length > 50 ? '...' : ''}"
+                            <div class="area-coords">
+                                <strong>Координаты:</strong><br>
+                                X1: ${bbox.x1?.toFixed(0) || 'N/A'}, Y1: ${bbox.y1?.toFixed(0) || 'N/A'}<br>
+                                X2: ${bbox.x2?.toFixed(0) || 'N/A'}, Y2: ${bbox.y2?.toFixed(0) || 'N/A'}<br>
+                                Страница: ${area.page_number || 'N/A'}, Уверенность: ${(area.confidence * 100).toFixed(2)}%
+                            </div>
+                        </div>
+                    `;
+                });
+            }
+            
+            if (areasHtml) {
+                document.getElementById('areasInfo').innerHTML = areasHtml;
+                document.getElementById('areasSection').style.display = 'block';
+            } else {
+                document.getElementById('areasSection').style.display = 'none';
+            }
+            
+            // Исправления
+            const corrections = data.corrections_applied || [];
+            let correctionsHtml = '';
+            
+            if (corrections.length > 0) {
+                corrections.forEach(correction => {
+                    correctionsHtml += `
+                        <li>
+                            <span class="from">${correction.from}</span> 
+                            → 
+                            <span class="to">${correction.to}</span>
+                            <span style="color: #666; font-size: 0.9em;"> (${correction.method || 'unknown'})</span>
+                        </li>
+                    `;
+                });
+            } else {
+                correctionsHtml = '<li style="color: #666;">Исправлений не было</li>';
+            }
+            
+            document.getElementById('correctionsList').innerHTML = correctionsHtml;
+            
+            // Текст
+            const fullText = data.extracted_data.full_text || 'Текст не распознан';
+            document.getElementById('textOutput').textContent = fullText;
+            
+            results.classList.add('show');
+            results.scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+</body>
+</html>
+

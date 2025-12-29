@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  ocr-service:
+    build: .
+    container_name: ocr-document-processor
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ../Датасет:/app/dataset:ro  # Монтирование датасета только для чтения
+    environment:
+      - LOG_LEVEL=INFO
+      - TESSERACT_CMD=/usr/bin/tesseract
+      - TESSERACT_LANG=rus+eng
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
