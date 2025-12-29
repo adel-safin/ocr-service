@@ -168,12 +168,6 @@ app/
 python scripts/analyze_feedback.py
 ```
 
-## Дополнительная документация
-
-- `PHASE2_README.md` - Документация по машинному обучению
-- `PHASE3_README.md` - Документация по активному обучению
-- `../COMPLETE_SYSTEM.md` - Полное описание системы
-
 ## Лицензия
 
 MIT
