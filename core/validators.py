@@ -62,6 +62,16 @@ class FieldValidator:
             'pattern': r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',
             'validation': lambda x: '@' in x and '.' in x.split('@')[1],
             'description': 'Email'
+        },
+        'number': {
+            'pattern': r'[№N]\s*[:\s]*[А-Яа-яA-Za-z0-9\-\.\/\s]+',
+            'validation': lambda x: bool(re.search(r'[№N]', x, re.IGNORECASE)),
+            'description': 'Номер документа'
+        },
+        'surname': {
+            'pattern': r'\b[А-ЯЁ][а-яё]+\b(?=\s+[А-ЯЁ][А-ЯЁ\.])',  # Фамилия перед инициалами
+            'validation': lambda x: len(x) >= 2 and x[0].isupper(),
+            'description': 'Фамилия'
         }
     }
     
@@ -189,3 +199,53 @@ class FieldValidator:
                 )
         
         return results
+    
+    def extract_important_data(self, text: str) -> Dict[str, List[str]]:
+        """
+        Извлечение важных данных из текста
+        
+        Args:
+            text: Текст для анализа
+            
+        Returns:
+            Словарь с найденными данными
+        """
+        important_data = {
+            'inn': [],
+            'snils': [],
+            'numbers': [],
+            'surnames': []
+        }
+        
+        # ИНН
+        inn_matches = self.find_field('inn', text)
+        important_data['inn'] = [val[0] for val in inn_matches]
+        
+        # СНИЛС
+        snils_matches = self.find_field('snils', text)
+        important_data['snils'] = [val[0] for val in snils_matches]
+        
+        # Номера (№)
+        number_matches = self.find_field('number', text)
+        important_data['numbers'] = [val[0] for val in number_matches]
+        
+        # Фамилии (улучшенный поиск)
+        # Ищем фамилии в разных форматах
+        surname_patterns = [
+            r'\b[А-ЯЁ][а-яё]{2,}\b(?=\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)',  # Фамилия И.О.
+            r'\b[А-ЯЁ][а-яё]{2,}\b(?=\s+[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+)',  # Фамилия Имя Отчество
+            r'[А-ЯЁ][а-яё]{3,}(?=\s+[А-ЯЁ]\.)',  # Фамилия И.
+        ]
+        
+        found_surnames = set()
+        for pattern in surname_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                if len(match) >= 3 and match[0].isupper():
+                    # Исключаем общие слова
+                    if match.lower() not in ['россия', 'российская', 'федерация', 'республика', 'область', 'край']:
+                        found_surnames.add(match)
+        
+        important_data['surnames'] = list(found_surnames)[:10]  # Ограничиваем до 10
+        
+        return important_data

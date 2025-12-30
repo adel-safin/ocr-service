@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OCR Сервис - Обработка документов</title>
+    <!-- PDF.js для предпросмотра PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -290,6 +292,143 @@
             color: #4caf50;
             font-weight: 600;
         }
+        
+        .preview-section {
+            margin-top: 30px;
+            display: none;
+        }
+        
+        .preview-section.show {
+            display: block;
+        }
+        
+        .preview-container {
+            position: relative;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+            overflow: visible;
+            background: #f5f5f5;
+            margin-bottom: 20px;
+            min-height: 200px;
+            display: inline-block;
+            width: 100%;
+        }
+        
+        .preview-image {
+            max-width: 100%;
+            max-height: 600px;
+            height: auto;
+            display: block;
+        }
+        
+        .preview-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: crosshair;
+            pointer-events: auto;
+            z-index: 10;
+            touch-action: none;
+        }
+        
+        .preview-message {
+            padding: 40px;
+            text-align: center;
+            color: #666;
+        }
+        
+        .preview-controls {
+            background: white;
+            padding: 15px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 0.9em;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        .btn-small:hover {
+            background: #764ba2;
+        }
+        
+        .selected-areas {
+            margin-top: 15px;
+        }
+        
+        .area-item {
+            background: #e3f2fd;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 5px;
+            border-left: 3px solid #2196f3;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .area-item button {
+            background: #f44336;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        .important-data {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        
+        .important-data h3 {
+            color: #e65100;
+            margin-bottom: 15px;
+        }
+        
+        .data-item {
+            background: white;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 5px;
+            border-left: 3px solid #ff9800;
+        }
+        
+        .data-label {
+            font-weight: 600;
+            color: #e65100;
+            margin-right: 10px;
+        }
+        
+        .data-value {
+            color: #333;
+            font-family: monospace;
+        }
+        
+        .data-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .data-tag {
+            background: #ff9800;
+            color: white;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
@@ -333,37 +472,40 @@
                 <button type="submit" class="btn" id="submitBtn">Обработать документ</button>
             </form>
             
+            <div class="preview-section" id="previewSection">
+                <h3 style="margin-bottom: 15px; color: #667eea;">📄 Предпросмотр документа</h3>
+                <div class="preview-container" id="previewContainer">
+                    <img id="previewImage" class="preview-image" alt="Предпросмотр">
+                    <canvas id="previewCanvas" class="preview-canvas"></canvas>
+                </div>
+                <div class="preview-controls">
+                    <button class="btn-small" id="clearAreasBtn">Очистить выделения</button>
+                    <span id="areasCount">Выделено областей: 0</span>
+                </div>
+                <div class="selected-areas" id="selectedAreas"></div>
+            </div>
+            
             <div class="loading" id="loading">
                 <div class="spinner"></div>
                 <p>Обработка документа...</p>
             </div>
             
-            <div class="results" id="results">
-                <div class="result-section">
-                    <h3>📊 Качество обработки</h3>
-                    <div id="qualityInfo"></div>
+                <div class="results" id="results">
+                    <div class="result-section" id="warningsSection" style="display: none;">
+                        <h3>⚠️ Предупреждения</h3>
+                        <div id="warningsInfo"></div>
+                    </div>
+                    
+                    <div class="result-section" id="selectedAreasSection" style="display: none;">
+                        <h3>🎯 Выделенные области (DPI 900)</h3>
+                        <div id="selectedAreasInfo"></div>
+                    </div>
+                    
+                    <div class="result-section">
+                        <h3>📝 Распознанный текст</h3>
+                        <div class="text-output" id="textOutput"></div>
+                    </div>
                 </div>
-                
-                <div class="result-section" id="warningsSection" style="display: none;">
-                    <h3>⚠️ Предупреждения</h3>
-                    <div id="warningsInfo"></div>
-                </div>
-                
-                <div class="result-section" id="areasSection" style="display: none;">
-                    <h3>📍 Выделяемые области</h3>
-                    <div id="areasInfo"></div>
-                </div>
-                
-                <div class="result-section">
-                    <h3>✏️ Применённые исправления</h3>
-                    <ul class="corrections-list" id="correctionsList"></ul>
-                </div>
-                
-                <div class="result-section">
-                    <h3>📝 Распознанный текст</h3>
-                    <div class="text-output" id="textOutput"></div>
-                </div>
-            </div>
         </div>
     </div>
     
@@ -406,11 +548,453 @@
             }
         });
         
+        let selectedAreas = [];
+        let isDrawing = false;
+        let startX = 0;
+        let startY = 0;
+        let currentRect = null;
+        
         function handleFileSelect(file) {
             fileName.textContent = file.name;
             fileSize.textContent = formatFileSize(file.size);
             fileInfo.style.display = 'block';
+            
+            // Показываем предпросмотр
+            const previewSection = document.getElementById('previewSection');
+            const container = document.getElementById('previewContainer');
+            
+            if (file.type.startsWith('image/')) {
+                // Восстанавливаем структуру контейнера
+                container.innerHTML = '<img id="previewImage" class="preview-image" alt="Предпросмотр"><canvas id="previewCanvas" class="preview-canvas"></canvas>';
+                
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = document.getElementById('previewImage');
+                    const canvas = document.getElementById('previewCanvas');
+                    
+                    if (img && canvas) {
+                        img.src = e.target.result;
+                        img.style.display = 'block';
+                        img.style.pointerEvents = 'none'; // Изображение не должно перехватывать события
+                        
+                        img.onload = () => {
+                            // Небольшая задержка для правильной загрузки
+                            setTimeout(() => {
+                                setupPreviewCanvas();
+                                previewSection.classList.add('show');
+                                previewSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                            }, 200);
+                        };
+                    }
+                };
+                reader.readAsDataURL(file);
+            } else if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                // Для PDF используем PDF.js
+                container.innerHTML = '<div id="pdfPreview" style="padding: 20px; text-align: center;"><div class="spinner"></div><p>Загрузка PDF...</p></div>';
+                previewSection.classList.add('show');
+                
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        // Проверяем, загружена ли библиотека PDF.js
+                        if (typeof pdfjsLib === 'undefined') {
+                            throw new Error('PDF.js не загружена');
+                        }
+                        
+                        const arrayBuffer = e.target.result;
+                        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                        const page = await pdf.getPage(1);
+                        
+                        // Получаем размеры страницы в точках (1/72 дюйма)
+                        const viewport72 = page.getViewport({ scale: 1.0 });
+                        const pageWidthPoints = viewport72.width;
+                        const pageHeightPoints = viewport72.height;
+                        
+                        // Вычисляем масштаб для DPI 300: 300 DPI = 300/72 = 4.167 точек на пиксель
+                        // Но для отображения используем меньший масштаб (1.5 для предпросмотра)
+                        const displayScale = 1.5;
+                        const viewport = page.getViewport({ scale: displayScale });
+                        
+                        // Реальные размеры PDF при DPI 300 (для координат)
+                        // 1 точка = 1/72 дюйма, при 300 DPI = 300/72 = 4.167 пикселей на точку
+                        const dpi300Scale = 300 / 72;  // ≈ 4.167
+                        const pdfRealWidth = pageWidthPoints * dpi300Scale;
+                        const pdfRealHeight = pageHeightPoints * dpi300Scale;
+                        
+                        console.log(`PDF загружен: размер страницы ${pageWidthPoints.toFixed(0)}x${pageHeightPoints.toFixed(0)} точек, DPI 300 размер ${pdfRealWidth.toFixed(0)}x${pdfRealHeight.toFixed(0)} пикселей`);
+                        
+                        const canvas = document.createElement('canvas');
+                        const ctx = canvas.getContext('2d');
+                        canvas.height = viewport.height;
+                        canvas.width = viewport.width;
+                        
+                        await page.render({
+                            canvasContext: ctx,
+                            viewport: viewport
+                        }).promise;
+                        
+                        container.innerHTML = '';
+                        canvas.id = 'pdfPreviewCanvas';
+                        canvas.className = 'preview-image';
+                        canvas.style.maxWidth = '100%';
+                        canvas.style.height = 'auto';
+                        canvas.style.display = 'block';
+                        canvas.style.pointerEvents = 'none'; // PDF canvas не должен перехватывать события
+                        container.appendChild(canvas);
+                        
+                        console.log(`PDF рендер: размер canvas ${canvas.width}x${canvas.height}, отображаемый размер ${canvas.offsetWidth}x${canvas.offsetHeight}`);
+                        
+                        // Добавляем canvas для выделения
+                        // ВАЖНО: для выделения используем те же размеры, что и для отображения (масштаб 1.5)
+                        // Реальные размеры PDF (DPI 300) будут использованы при отправке на сервер
+                        const selectionCanvas = document.createElement('canvas');
+                        selectionCanvas.id = 'previewCanvas';
+                        selectionCanvas.className = 'preview-canvas';
+                        // Используем размеры рендеренного canvas (для правильного выделения)
+                        selectionCanvas.width = canvas.width;
+                        selectionCanvas.height = canvas.height;
+                        selectionCanvas.style.width = canvas.width + 'px';
+                        selectionCanvas.style.height = canvas.height + 'px';
+                        selectionCanvas.style.position = 'absolute';
+                        selectionCanvas.style.top = '0';
+                        selectionCanvas.style.left = '0';
+                        selectionCanvas.style.zIndex = '10';
+                        container.appendChild(selectionCanvas);
+                        
+                        // Сохраняем информацию о PDF для правильного масштабирования координат при отправке
+                        canvas.dataset.pdfRealWidth = pdfRealWidth;
+                        canvas.dataset.pdfRealHeight = pdfRealHeight;
+                        canvas.dataset.pdfDisplayWidth = canvas.width;
+                        canvas.dataset.pdfDisplayHeight = canvas.height;
+                        
+                        console.log(`Canvas выделения: размер ${selectionCanvas.width}x${selectionCanvas.height}, реальный PDF ${pdfRealWidth.toFixed(0)}x${pdfRealHeight.toFixed(0)}`);
+                        
+                        // Настраиваем выделение для PDF
+                        setTimeout(() => {
+                            setupPreviewCanvas();
+                        }, 400);
+                        
+                        previewSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    } catch (error) {
+                        console.error('Ошибка загрузки PDF:', error);
+                        container.innerHTML = '<div class="preview-message">📄 Не удалось загрузить PDF для предпросмотра.<br>Вы можете выделить области после обработки.</div>';
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                // Для других типов файлов
+                container.innerHTML = '<div class="preview-message">Предпросмотр недоступен для этого типа файла</div>';
+                previewSection.classList.add('show');
+            }
         }
+        
+        function setupPreviewCanvas() {
+            const canvas = document.getElementById('previewCanvas');
+            const container = document.getElementById('previewContainer');
+            
+            if (!canvas || !container) return;
+            
+            // Определяем базовое изображение (img или canvas с PDF)
+            const img = document.getElementById('previewImage');
+            let baseElement = img;
+            
+            if (!baseElement) {
+                // Ищем canvas с PDF (первый canvas в контейнере, который не previewCanvas)
+                const pdfCanvas = container.querySelector('canvas:not(#previewCanvas)');
+                if (pdfCanvas) {
+                    baseElement = pdfCanvas;
+                }
+            }
+            
+            if (!baseElement) {
+                // Если нет базового элемента, используем размеры контейнера
+                const rect = container.getBoundingClientRect();
+                canvas.width = rect.width;
+                canvas.height = rect.height;
+                canvas.style.width = rect.width + 'px';
+                canvas.style.height = rect.height + 'px';
+            } else {
+                // Используем размеры базового элемента
+                const baseWidth = baseElement.offsetWidth || baseElement.width || baseElement.clientWidth;
+                const baseHeight = baseElement.offsetHeight || baseElement.height || baseElement.clientHeight;
+                
+                canvas.width = baseWidth;
+                canvas.height = baseHeight;
+                canvas.style.width = baseWidth + 'px';
+                canvas.style.height = baseHeight + 'px';
+            }
+            
+            const ctx = canvas.getContext('2d');
+            
+            // Очищаем canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Перерисовываем существующие области
+            redrawAreas(ctx);
+            
+            // Удаляем старые обработчики через клонирование canvas
+            const newCanvas = canvas.cloneNode(false);
+            canvas.parentNode.replaceChild(newCanvas, canvas);
+            const canvasEl = document.getElementById('previewCanvas');
+            
+            // Устанавливаем размеры для нового canvas
+            // ВАЖНО: для PDF используем размеры отображения, а не реальные размеры DPI 300
+            // Реальные размеры будут использованы при масштабировании координат при отправке
+            if (baseElement) {
+                // Получаем размеры изображения
+                let realWidth, realHeight;
+                let displayWidth, displayHeight;
+                
+                if (baseElement.tagName === 'IMG') {
+                    // Для изображений используем naturalWidth/naturalHeight (реальные размеры)
+                    realWidth = baseElement.naturalWidth || baseElement.width;
+                    realHeight = baseElement.naturalHeight || baseElement.height;
+                    // Отображаемые размеры
+                    displayWidth = baseElement.offsetWidth || baseElement.clientWidth;
+                    displayHeight = baseElement.offsetHeight || baseElement.clientHeight;
+                } else if (baseElement.tagName === 'CANVAS') {
+                    // Для PDF canvas - используем размеры отображения (не реальные DPI 300!)
+                    // Реальные размеры PDF сохраняются в dataset для масштабирования координат
+                    realWidth = baseElement.width;  // Размеры рендеренного canvas
+                    realHeight = baseElement.height;
+                    // Отображаемые размеры
+                    displayWidth = baseElement.offsetWidth || baseElement.clientWidth;
+                    displayHeight = baseElement.offsetHeight || baseElement.clientHeight;
+                    
+                    console.log(`PDF canvas: используем размеры отображения ${realWidth}x${realHeight} (реальные PDF ${baseElement.dataset.pdfRealWidth || 'N/A'}x${baseElement.dataset.pdfRealHeight || 'N/A'})`);
+                } else {
+                    const rect = baseElement.getBoundingClientRect();
+                    realWidth = rect.width || baseElement.offsetWidth;
+                    realHeight = rect.height || baseElement.offsetHeight;
+                    displayWidth = rect.width;
+                    displayHeight = rect.height;
+                }
+                
+                console.log(`Настройка canvas: размеры ${realWidth}x${realHeight}, отображаемые ${displayWidth}x${displayHeight}`);
+                
+                // Устанавливаем внутренние размеры canvas равными размерам отображения
+                // Для PDF это размеры рендеренного canvas, для изображений - реальные размеры
+                canvasEl.width = realWidth;
+                canvasEl.height = realHeight;
+                
+                // Для отображения используем отображаемые размеры
+                canvasEl.style.width = displayWidth + 'px';
+                canvasEl.style.height = displayHeight + 'px';
+                
+                // Сохраняем масштаб для правильного вычисления координат
+                const scaleX = realWidth / displayWidth;
+                const scaleY = realHeight / displayHeight;
+                canvasEl.dataset.scaleX = scaleX;
+                canvasEl.dataset.scaleY = scaleY;
+                
+                console.log(`Canvas настроен: размер ${canvasEl.width}x${canvasEl.height}, масштаб ${scaleX.toFixed(2)}x${scaleY.toFixed(2)}`);
+            }
+            canvasEl.style.position = 'absolute';
+            canvasEl.style.top = '0';
+            canvasEl.style.left = '0';
+            canvasEl.style.zIndex = '10';
+            
+            const newCtx = canvasEl.getContext('2d');
+            redrawAreas(newCtx);
+            
+            // Функция для обработки движения мыши (используется и для canvas, и для document)
+            function handleMouseMove(e) {
+                if (!isDrawing) return;
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const rect = canvasEl.getBoundingClientRect();
+                // Масштаб между отображаемым размером и реальным размером canvas
+                const scaleX = canvasEl.width / rect.width;
+                const scaleY = canvasEl.height / rect.height;
+                
+                // Вычисляем координаты относительно canvas в реальных размерах
+                let currentX = (e.clientX - rect.left) * scaleX;
+                let currentY = (e.clientY - rect.top) * scaleY;
+                
+                // НЕ ограничиваем координаты - позволяем выделять за видимыми границами
+                // Но для отрисовки ограничиваем видимой областью canvas
+                const drawX = Math.max(0, Math.min(canvasEl.width, currentX));
+                const drawY = Math.max(0, Math.min(canvasEl.height, currentY));
+                const drawStartX = Math.max(0, Math.min(canvasEl.width, startX));
+                const drawStartY = Math.max(0, Math.min(canvasEl.height, startY));
+                
+                newCtx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+                redrawAreas(newCtx);
+                
+                // Рисуем текущее выделение (ограничиваем видимой областью)
+                newCtx.strokeStyle = '#667eea';
+                newCtx.lineWidth = 2;
+                newCtx.setLineDash([5, 5]);
+                newCtx.strokeRect(drawStartX, drawStartY, drawX - drawStartX, drawY - drawStartY);
+                
+                newCtx.fillStyle = 'rgba(102, 126, 234, 0.1)';
+                newCtx.fillRect(drawStartX, drawStartY, drawX - drawStartX, drawY - drawStartY);
+            }
+            
+            // Функция для завершения выделения
+            function handleMouseUp(e) {
+                if (!isDrawing) return;
+                e.preventDefault();
+                e.stopPropagation();
+                isDrawing = false;
+                
+                // Удаляем глобальные обработчики
+                document.removeEventListener('mousemove', handleMouseMove);
+                document.removeEventListener('mouseup', handleMouseUp);
+                
+                const rect = canvasEl.getBoundingClientRect();
+                // Масштаб между отображаемым размером и реальным размером canvas
+                const scaleX = canvasEl.width / rect.width;
+                const scaleY = canvasEl.height / rect.height;
+                
+                // Вычисляем конечные координаты в реальных размерах canvas
+                let endX = (e.clientX - rect.left) * scaleX;
+                let endY = (e.clientY - rect.top) * scaleY;
+                
+                // Для сохранения области ограничиваем границами canvas (реальные размеры)
+                const finalStartX = Math.max(0, Math.min(canvasEl.width, startX));
+                const finalStartY = Math.max(0, Math.min(canvasEl.height, startY));
+                const finalEndX = Math.max(0, Math.min(canvasEl.width, endX));
+                const finalEndY = Math.max(0, Math.min(canvasEl.height, endY));
+                
+                const area = {
+                    x: Math.min(finalStartX, finalEndX),
+                    y: Math.min(finalStartY, finalEndY),
+                    width: Math.abs(finalEndX - finalStartX),
+                    height: Math.abs(finalEndY - finalStartY)
+                };
+                
+                console.log(`Завершение выделения: старт [${startX.toFixed(0)}, ${startY.toFixed(0)}], конец [${endX.toFixed(0)}, ${endY.toFixed(0)}], область [${area.x.toFixed(0)}, ${area.y.toFixed(0)}, ${area.width.toFixed(0)}, ${area.height.toFixed(0)}]`);
+                
+                if (area.width > 10 && area.height > 10) {
+                    selectedAreas.push(area);
+                    console.log(`Добавлена область ${selectedAreas.length}: [${area.x}, ${area.y}, ${area.width}, ${area.height}]`);
+                    updateAreasDisplay();
+                    redrawAreas(newCtx);
+                } else {
+                    // Перерисовываем без нового выделения
+                    newCtx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+                    redrawAreas(newCtx);
+                }
+            }
+            
+            // Обработчики событий для выделения
+            canvasEl.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                isDrawing = true;
+                const rect = canvasEl.getBoundingClientRect();
+                // Масштаб между отображаемым размером и реальным размером canvas
+                const scaleX = canvasEl.width / rect.width;
+                const scaleY = canvasEl.height / rect.height;
+                startX = (e.clientX - rect.left) * scaleX;
+                startY = (e.clientY - rect.top) * scaleY;
+                
+                console.log(`Начало выделения: клик [${e.clientX}, ${e.clientY}], rect [${rect.left}, ${rect.top}, ${rect.width}, ${rect.height}], canvas [${canvasEl.width}, ${canvasEl.height}], масштаб [${scaleX.toFixed(2)}, ${scaleY.toFixed(2)}], старт [${startX.toFixed(0)}, ${startY.toFixed(0)}]`);
+                
+                // Добавляем глобальные обработчики для отслеживания мыши за пределами canvas
+                document.addEventListener('mousemove', handleMouseMove, { passive: false });
+                document.addEventListener('mouseup', handleMouseUp, { passive: false });
+            }, { passive: false });
+            
+            // Локальное движение мыши на canvas (для быстрого отклика)
+            canvasEl.addEventListener('mousemove', handleMouseMove, { passive: false });
+            
+            // Убираем mouseleave - теперь не сбрасываем выделение при выходе за пределы
+            
+            // Поддержка touch событий для мобильных устройств
+            canvasEl.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const mouseEvent = new MouseEvent('mousedown', {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY,
+                    bubbles: true
+                });
+                canvasEl.dispatchEvent(mouseEvent);
+            }, { passive: false });
+            
+            canvasEl.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const mouseEvent = new MouseEvent('mousemove', {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY,
+                    bubbles: true
+                });
+                canvasEl.dispatchEvent(mouseEvent);
+            }, { passive: false });
+            
+            canvasEl.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                const mouseEvent = new MouseEvent('mouseup', {
+                    bubbles: true
+                });
+                canvasEl.dispatchEvent(mouseEvent);
+            }, { passive: false });
+            
+        }
+        
+        function redrawAreas(ctx) {
+            if (!ctx) return;
+            selectedAreas.forEach((area, index) => {
+                ctx.strokeStyle = index % 2 === 0 ? '#667eea' : '#764ba2';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([]);
+                ctx.strokeRect(area.x, area.y, area.width, area.height);
+                
+                ctx.fillStyle = index % 2 === 0 ? 'rgba(102, 126, 234, 0.2)' : 'rgba(118, 75, 162, 0.2)';
+                ctx.fillRect(area.x, area.y, area.width, area.height);
+                
+                // Добавляем номер области
+                ctx.fillStyle = index % 2 === 0 ? '#667eea' : '#764ba2';
+                ctx.font = '14px Arial';
+                ctx.fillText((index + 1).toString(), area.x + 5, area.y + 18);
+            });
+        }
+        
+        function updateAreasDisplay() {
+            document.getElementById('areasCount').textContent = `Выделено областей: ${selectedAreas.length}`;
+            
+            const areasDiv = document.getElementById('selectedAreas');
+            areasDiv.innerHTML = '';
+            
+            selectedAreas.forEach((area, index) => {
+                const areaItem = document.createElement('div');
+                areaItem.className = 'area-item';
+                areaItem.innerHTML = `
+                    <div>
+                        <strong>Область ${index + 1}:</strong> 
+                        X: ${Math.round(area.x)}, Y: ${Math.round(area.y)}, 
+                        Ш: ${Math.round(area.width)}, В: ${Math.round(area.height)}
+                    </div>
+                    <button onclick="removeArea(${index})">Удалить</button>
+                `;
+                areasDiv.appendChild(areaItem);
+            });
+        }
+        
+        function removeArea(index) {
+            selectedAreas.splice(index, 1);
+            updateAreasDisplay();
+            const canvas = document.getElementById('previewCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            redrawAreas(ctx);
+        }
+        
+        document.getElementById('clearAreasBtn').addEventListener('click', () => {
+            selectedAreas = [];
+            updateAreasDisplay();
+            const canvas = document.getElementById('previewCanvas');
+            if (canvas) {
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            }
+        });
         
         function formatFileSize(bytes) {
             if (bytes === 0) return '0 Bytes';
@@ -436,12 +1020,60 @@
                 formData.append('required_fields', requiredFields);
             }
             
+            // Добавляем выделенные области
+            if (selectedAreas.length > 0) {
+                const canvas = document.getElementById('previewCanvas');
+                const baseElement = document.getElementById('previewImage') || document.querySelector('#previewContainer canvas:not(#previewCanvas)');
+                
+                if (canvas) {
+                    // Для PDF: координаты в canvas в размерах отображения (масштаб 1.5)
+                    // Нужно масштабировать их до реальных размеров PDF (DPI 300)
+                    // Для изображений: координаты уже в реальных размерах
+                    
+                    let scaleX = 1.0, scaleY = 1.0;
+                    
+                    if (baseElement && baseElement.tagName === 'CANVAS' && baseElement.dataset.pdfRealWidth) {
+                        // Для PDF: масштабируем от размеров отображения к реальным размерам PDF (DPI 300)
+                        const pdfRealWidth = parseFloat(baseElement.dataset.pdfRealWidth);
+                        const pdfRealHeight = parseFloat(baseElement.dataset.pdfRealHeight);
+                        const pdfDisplayWidth = parseFloat(baseElement.dataset.pdfDisplayWidth) || baseElement.width;
+                        const pdfDisplayHeight = parseFloat(baseElement.dataset.pdfDisplayHeight) || baseElement.height;
+                        
+                        scaleX = pdfRealWidth / pdfDisplayWidth;
+                        scaleY = pdfRealHeight / pdfDisplayHeight;
+                        
+                        console.log(`PDF масштабирование: отображение ${pdfDisplayWidth}x${pdfDisplayHeight} -> реальный ${pdfRealWidth.toFixed(0)}x${pdfRealHeight.toFixed(0)}, масштаб ${scaleX.toFixed(3)}x${scaleY.toFixed(3)}`);
+                    } else if (baseElement && baseElement.tagName === 'IMG') {
+                        // Для изображений: координаты уже в реальных размерах
+                        scaleX = 1.0;
+                        scaleY = 1.0;
+                        console.log(`Изображение: координаты уже в реальных размерах`);
+                    }
+                    
+                    const areasToSend = selectedAreas.map((area, index) => {
+                        // Масштабируем координаты для PDF или оставляем как есть для изображений
+                        const x1 = Math.round(area.x * scaleX);
+                        const y1 = Math.round(area.y * scaleY);
+                        const x2 = Math.round((area.x + area.width) * scaleX);
+                        const y2 = Math.round((area.y + area.height) * scaleY);
+                        
+                        console.log(`Область ${index + 1}: canvas [${area.x.toFixed(0)}, ${area.y.toFixed(0)}, ${area.width.toFixed(0)}, ${area.height.toFixed(0)}] -> отправка [${x1}, ${y1}, ${x2}, ${y2}] (масштаб ${scaleX.toFixed(3)}x${scaleY.toFixed(3)})`);
+                        
+                        return { x1, y1, x2, y2 };
+                    });
+                    
+                    formData.append('selected_areas', JSON.stringify(areasToSend));
+                } else {
+                    console.warn('Canvas не найден, выделенные области не будут отправлены');
+                }
+            }
+            
             submitBtn.disabled = true;
             loading.classList.add('show');
             results.classList.remove('show');
             
             try {
-                const response = await fetch('/api/process', {
+                const response = await fetch('/api/v1/process', {
                     method: 'POST',
                     body: formData
                 });
@@ -461,20 +1093,6 @@
         });
         
         function displayResults(data) {
-            // Качество
-            const quality = data.quality_report.overall_quality;
-            const qualityClass = quality >= 0.8 ? 'quality-high' : quality >= 0.6 ? 'quality-medium' : 'quality-low';
-            const qualityText = (quality * 100).toFixed(2) + '%';
-            
-            document.getElementById('qualityInfo').innerHTML = `
-                <div class="quality-badge ${qualityClass}">Общее качество: ${qualityText}</div>
-                <div class="quality-badge ${qualityClass}">Уверенность OCR: ${(data.quality_report.ocr_confidence * 100).toFixed(2)}%</div>
-                <p style="margin-top: 15px;">
-                    <strong>Всего страниц:</strong> ${data.total_pages || 1}<br>
-                    <strong>Исправлений:</strong> ${data.corrections_applied?.length || 0}
-                </p>
-            `;
-            
             // Предупреждения
             const warnings = data.quality_report.warnings || [];
             const issues = data.quality_report.issues || [];
@@ -514,7 +1132,31 @@
                 document.getElementById('warningsSection').style.display = 'none';
             }
             
-            // Выделяемые области
+            // Выделенные области (DPI 900)
+            const selectedAreas = data.extracted_data.selected_areas || [];
+            if (selectedAreas.length > 0) {
+                let areasHtml = '';
+                selectedAreas.forEach(area => {
+                    const coords = area.coordinates || {};
+                    areasHtml += `<div class="selected-area-result" style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #667eea;">
+                        <div style="font-weight: bold; color: #667eea; margin-bottom: 10px;">
+                            🎯 Область ${area.area_number || 'N/A'} (DPI ${area.dpi || 900})
+                        </div>
+                        <div style="font-size: 0.9em; color: #666; margin-bottom: 10px;">
+                            Координаты: X1:${coords.x1 || 0}, Y1:${coords.y1 || 0}, X2:${coords.x2 || 0}, Y2:${coords.y2 || 0}
+                        </div>
+                        <div style="background: white; padding: 12px; border-radius: 4px; border: 1px solid #ddd; white-space: pre-wrap; font-family: monospace; line-height: 1.6;">
+                            ${escapeHtml(area.text || 'Текст не распознан')}
+                        </div>
+                    </div>`;
+                });
+                document.getElementById('selectedAreasInfo').innerHTML = areasHtml;
+                document.getElementById('selectedAreasSection').style.display = 'block';
+            } else {
+                document.getElementById('selectedAreasSection').style.display = 'none';
+            }
+            
+            // Выделяемые области (старый код для text_regions)
             const textRegions = data.quality_report.text_regions || [];
             let areasHtml = '';
             
@@ -562,40 +1204,18 @@
                 });
             }
             
-            if (areasHtml) {
-                document.getElementById('areasInfo').innerHTML = areasHtml;
-                document.getElementById('areasSection').style.display = 'block';
-            } else {
-                document.getElementById('areasSection').style.display = 'none';
-            }
-            
-            // Исправления
-            const corrections = data.corrections_applied || [];
-            let correctionsHtml = '';
-            
-            if (corrections.length > 0) {
-                corrections.forEach(correction => {
-                    correctionsHtml += `
-                        <li>
-                            <span class="from">${correction.from}</span> 
-                            → 
-                            <span class="to">${correction.to}</span>
-                            <span style="color: #666; font-size: 0.9em;"> (${correction.method || 'unknown'})</span>
-                        </li>
-                    `;
-                });
-            } else {
-                correctionsHtml = '<li style="color: #666;">Исправлений не было</li>';
-            }
-            
-            document.getElementById('correctionsList').innerHTML = correctionsHtml;
-            
             // Текст
             const fullText = data.extracted_data.full_text || 'Текст не распознан';
             document.getElementById('textOutput').textContent = fullText;
             
             results.classList.add('show');
             results.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
     </script>
 </body>

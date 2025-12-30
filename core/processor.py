@@ -95,7 +95,8 @@ class DocumentPipeline:
                 self.use_ml = False
     
     def process(self, file_path: str, template: Optional[str] = None, 
-                required_fields: Optional[List[str]] = None) -> Dict[str, Any]:
+                required_fields: Optional[List[str]] = None,
+                selected_areas: Optional[List[Dict[str, int]]] = None) -> Dict[str, Any]:
         """
         Полная обработка документа
         
@@ -112,6 +113,91 @@ class DocumentPipeline:
         try:
             # 1. Обработка всех страниц PDF отдельно
             file_ext = os.path.splitext(file_path)[1].lower()
+            
+            # Обработка выделенных областей с повышенным DPI (900)
+            selected_areas_text = ""
+            selected_areas_data = []  # Список данных о каждой выделенной области
+            if selected_areas and len(selected_areas) > 0:
+                logger.info(f"Обработка {len(selected_areas)} выделенных областей с DPI 900")
+                try:
+                    # Загружаем изображение с высоким DPI для выделенных областей
+                    if file_ext == '.pdf':
+                        # Для PDF обрабатываем первую страницу (можно расширить для всех страниц)
+                        high_dpi_image, _ = self.ocr_engine.load_image(file_path, page=1, dpi=900)
+                    else:
+                        # Для изображений загружаем с высоким DPI (масштабируем)
+                        high_dpi_image, _ = self.ocr_engine.load_image(file_path, dpi=900)
+                    
+                    # Координаты приходят для изображения с DPI 300 (реальные размеры изображения)
+                    # Нужно масштабировать их для изображения с DPI 900
+                    if file_ext == '.pdf':
+                        # Для PDF получаем размеры первой страницы с DPI 300
+                        normal_dpi_image, _ = self.ocr_engine.load_image(file_path, page=1, dpi=300)
+                    else:
+                        normal_dpi_image, _ = self.ocr_engine.load_image(file_path, dpi=300)
+                    
+                    # Вычисляем масштаб на основе реальных размеров изображений
+                    normal_height, normal_width = normal_dpi_image.shape[:2]
+                    high_height, high_width = high_dpi_image.shape[:2]
+                    
+                    # Масштаб: DPI 900 в 3 раза больше DPI 300 (900/300 = 3.0)
+                    actual_scale_x = high_width / normal_width if normal_width > 0 else 3.0
+                    actual_scale_y = high_height / normal_height if normal_height > 0 else 3.0
+                    
+                    logger.info(f"Масштабирование координат: DPI 300 размер {normal_width}x{normal_height}, DPI 900 размер {high_width}x{high_height}, масштаб {actual_scale_x:.2f}x{actual_scale_y:.2f}")
+                    
+                    # Обрабатываем каждую выделенную область
+                    area_texts = []
+                    for i, area in enumerate(selected_areas):
+                        try:
+                            # Координаты уже в размерах изображения с DPI 300, масштабируем для DPI 900
+                            original_x1 = area.get('x1', 0)
+                            original_y1 = area.get('y1', 0)
+                            original_x2 = area.get('x2', 0)
+                            original_y2 = area.get('y2', 0)
+                            
+                            scaled_area = {
+                                'x1': int(original_x1 * actual_scale_x),
+                                'y1': int(original_y1 * actual_scale_y),
+                                'x2': int(original_x2 * actual_scale_x),
+                                'y2': int(original_y2 * actual_scale_y)
+                            }
+                            
+                            logger.info(f"Область {i+1}: исходные координаты (DPI 300) x1={original_x1}, y1={original_y1}, x2={original_x2}, y2={original_y2}")
+                            logger.info(f"Область {i+1}: масштабированные координаты (DPI 900) x1={scaled_area['x1']}, y1={scaled_area['y1']}, x2={scaled_area['x2']}, y2={scaled_area['y2']}")
+                            
+                            area_result = self.ocr_engine.extract_text_by_area(high_dpi_image, scaled_area, dpi=900)
+                            if area_result.get('text'):
+                                area_text = area_result['text']
+                                area_texts.append(f"[Область {i+1}]: {area_text}")
+                                
+                                # Сохраняем данные о каждой области отдельно (исходные координаты)
+                                selected_areas_data.append({
+                                    'area_number': i + 1,
+                                    'coordinates': {
+                                        'x1': area.get('x1', 0),
+                                        'y1': area.get('y1', 0),
+                                        'x2': area.get('x2', 0),
+                                        'y2': area.get('y2', 0)
+                                    },
+                                    'text': area_text,
+                                    'confidence': area_result.get('confidence', 0.0),
+                                    'word_count': area_result.get('word_count', 0),
+                                    'dpi': 900
+                                })
+                                
+                                logger.info(f"Область {i+1}: распознано {len(area_text)} символов, уверенность {area_result.get('confidence', 0):.2%}")
+                        except Exception as area_e:
+                            logger.error(f"Ошибка при обработке области {i+1}: {str(area_e)}")
+                            import traceback
+                            logger.error(traceback.format_exc())
+                            continue
+                    
+                    if area_texts:
+                        selected_areas_text = "\n\n--- ВЫДЕЛЕННЫЕ ОБЛАСТИ (DPI 900) ---\n\n" + "\n\n".join(area_texts)
+                except Exception as e:
+                    logger.error(f"Ошибка при обработке выделенных областей: {str(e)}")
+                    # Продолжаем обработку без выделенных областей
             
             if file_ext == '.pdf':
                 # Обрабатываем все страницы
@@ -133,6 +219,7 @@ class DocumentPipeline:
                     })
                 
                 raw_text = '\n\n--- Страница ---\n\n'.join(all_texts)
+                
                 avg_confidence = sum(all_confidences) / len(all_confidences) if all_confidences else 0.0
                 
                 ocr_result = {
@@ -149,6 +236,7 @@ class DocumentPipeline:
                 image, file_type = self.ocr_engine.load_image(file_path)
                 ocr_result = self.ocr_engine.extract_text(image)
                 raw_text = ocr_result['text']
+                raw_text = ocr_result['text']
                 ocr_result['pages'] = [{
                     'page_number': 1,
                     'text': raw_text,
@@ -156,6 +244,10 @@ class DocumentPipeline:
                     'word_count': ocr_result.get('word_count', 0)
                 }]
                 ocr_result['total_pages'] = 1
+            
+            # 2.5. Добавляем текст из выделенных областей в начало
+            if selected_areas_text:
+                raw_text = selected_areas_text + "\n\n--- ОСНОВНОЙ ТЕКСТ ---\n\n" + raw_text
             
             # 3. Автокоррекция (базовая)
             corrected_text, corrections_applied = self.corrector.correct_text(raw_text)
@@ -247,6 +339,9 @@ class DocumentPipeline:
                 except Exception as e:
                     logger.warning(f"Ошибка классификации документа: {str(e)}")
             
+            # 5.6. Извлечение важных данных
+            important_data = self.validator.extract_important_data(corrected_text)
+            
             # 6. Формирование результата
             result = {
                 'document_id': document_id,
@@ -255,6 +350,7 @@ class DocumentPipeline:
                 'file_type': file_type,
                 'template': template,
                 'quality_report': quality_report,
+                'important_data': important_data,
                 'extracted_data': {
                     'critical_fields': {
                         field: {
@@ -269,7 +365,8 @@ class DocumentPipeline:
                     'full_text': corrected_text,
                     'raw_text': raw_text,
                     'pages': ocr_result.get('pages', []),
-                    'total_pages': ocr_result.get('total_pages', 1)
+                    'total_pages': ocr_result.get('total_pages', 1),
+                    'selected_areas': selected_areas_data  # Добавляем данные о выделенных областях
                 },
                 'total_pages': ocr_result.get('total_pages', 1),
                 'corrections_applied': corrections_applied,

@@ -33,7 +33,8 @@ corrector = AutoCorrectionSystem()
 async def process_document(
     file: UploadFile = File(...),
     template: Optional[str] = Form(None),
-    required_fields: Optional[str] = Form(None)
+    required_fields: Optional[str] = Form(None),
+    selected_areas: Optional[str] = Form(None)
 ):
     """
     Основной endpoint обработки документа
@@ -42,6 +43,7 @@ async def process_document(
         file: Загружаемый файл
         template: Тип шаблона документа (опционально)
         required_fields: Список обязательных полей через запятую
+        selected_areas: JSON строка с выделенными областями [{"x1": int, "y1": int, "x2": int, "y2": int}, ...]
         
     Returns:
         Результаты обработки
@@ -61,8 +63,17 @@ async def process_document(
         if required_fields:
             fields_list = [f.strip() for f in required_fields.split(',')]
         
+        # Парсинг выделенных областей
+        areas_list = None
+        if selected_areas:
+            import json
+            try:
+                areas_list = json.loads(selected_areas)
+            except json.JSONDecodeError:
+                logger.warning(f"Не удалось распарсить selected_areas: {selected_areas}")
+        
         # Обработка документа
-        result = pipeline.process(temp_file, template, fields_list)
+        result = pipeline.process(temp_file, template, fields_list, selected_areas=areas_list)
         
         return JSONResponse(content=result)
         

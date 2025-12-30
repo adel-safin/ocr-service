@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Optional
 import os
 import logging
 import sys
+import tempfile
 from pathlib import Path
 
 # Vision Framework через PyObjC
@@ -80,13 +81,14 @@ class OCREngine:
         
         return denoised
     
-    def load_image(self, file_path: str, page: Optional[int] = None) -> Tuple[np.ndarray, str]:
+    def load_image(self, file_path: str, page: Optional[int] = None, dpi: int = 300) -> Tuple[np.ndarray, str]:
         """
         Загрузка изображения из файла (PDF, JPG, PNG)
         
         Args:
             file_path: Путь к файлу
             page: Номер страницы для PDF (если None - первая страница)
+            dpi: DPI для конвертации PDF (по умолчанию 300, для выделенных областей можно использовать 900)
             
         Returns:
             Кортеж (изображение, тип файла)
@@ -96,9 +98,9 @@ class OCREngine:
         if file_ext == '.pdf':
             # Конвертация PDF в изображение
             if page is not None:
-                images = convert_from_path(file_path, dpi=300, first_page=page, last_page=page)
+                images = convert_from_path(file_path, dpi=dpi, first_page=page, last_page=page)
             else:
-                images = convert_from_path(file_path, dpi=300, first_page=1, last_page=1)
+                images = convert_from_path(file_path, dpi=dpi, first_page=1, last_page=1)
             
             if images:
                 img_array = np.array(images[0])
@@ -322,27 +324,83 @@ class OCREngine:
             except:
                 pass
     
-    def extract_text_by_area(self, image: np.ndarray, area: Dict[str, int]) -> Dict[str, any]:
+    def extract_text_by_area(self, image: np.ndarray, area: Dict[str, int], dpi: int = 900) -> Dict[str, any]:
         """
-        Извлечение текста из определенной области изображения
+        Извлечение текста из выделенной области с повышенным DPI
         
         Args:
-            image: Изображение
-            area: Словарь с координатами {'x1', 'y1', 'x2', 'y2'}
+            image: Изображение (уже загруженное с высоким DPI)
+            area: Словарь с координатами {'x1': int, 'y1': int, 'x2': int, 'y2': int}
+            dpi: DPI для обработки (по умолчанию 900 для выделенных областей)
             
         Returns:
-            Результаты распознавания для области
+            Результат OCR для выделенной области
         """
-        x1, y1 = area['x1'], area['y1']
-        x2, y2 = area['x2'], area['y2']
+        x1, y1 = int(area['x1']), int(area['y1'])
+        x2, y2 = int(area['x2']), int(area['y2'])
         
-        # Обрезка области
-        roi = image[y1:y2, x1:x2]
+        # Проверяем границы изображения
+        img_height, img_width = image.shape[:2]
+        x1 = max(0, min(x1, img_width))
+        y1 = max(0, min(y1, img_height))
+        x2 = max(0, min(x2, img_width))
+        y2 = max(0, min(y2, img_height))
         
-        if roi.size == 0:
-            return {'text': '', 'confidence': 0.0, 'detailed_data': {}}
+        logger.info(f"Обрезка области: координаты [{x1}, {y1}, {x2}, {y2}], размер изображения {img_width}x{img_height}")
         
-        return self.extract_text(roi)
+        # Обрезаем изображение по выделенной области
+        cropped_image = image[y1:y2, x1:x2]
+        
+        if cropped_image.size == 0:
+            logger.warning(f"Выделенная область пуста: {area}")
+            return {
+                'text': '',
+                'confidence': 0.0,
+                'detailed_data': [],
+                'word_count': 0,
+                'text_regions': []
+            }
+        
+        # Для выделенных областей с высоким DPI не применяем дополнительное масштабирование
+        # и используем более мягкий препроцессинг
+        height, width = cropped_image.shape[:2]
+        logger.info(f"Обрезка области: размер {width}x{height}, координаты {x1},{y1} - {x2},{y2}")
+        
+        # Для маленьких областей применяем более мягкий препроцессинг
+        if width < 100 or height < 50:
+            # Для очень маленьких областей - минимальный препроцессинг
+            if len(cropped_image.shape) == 3:
+                processed = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
+            else:
+                processed = cropped_image.copy()
+            
+            # Только лёгкое улучшение контраста
+            clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(4, 4))
+            processed = clahe.apply(processed)
+        else:
+            # Для больших областей - стандартный препроцессинг, но без агрессивного масштабирования
+            if len(cropped_image.shape) == 3:
+                processed = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2GRAY)
+            else:
+                processed = cropped_image.copy()
+            
+            # Улучшение контраста (более мягкое для выделенных областей)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced = clahe.apply(processed)
+            
+            # Лёгкое удаление шума (менее агрессивное)
+            processed = cv2.fastNlMeansDenoising(enhanced, None, 3, 7, 21)
+        
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+            tmp_path = tmp_file.name
+            cv2.imwrite(tmp_path, processed)
+        
+        try:
+            result = self.extract_text_vision(tmp_path)
+            logger.info(f"Область {area}: распознано {len(result.get('text', ''))} символов, уверенность {result.get('confidence', 0):.2%}")
+            return result
+        finally:
+            os.unlink(tmp_path)
     
     def process_file(self, file_path: str) -> Dict[str, any]:
         """
