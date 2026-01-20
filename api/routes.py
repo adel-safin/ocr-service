@@ -1,10 +1,29 @@
 """API endpoints"""
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 from fastapi.responses import JSONResponse
-from typing import List, Optional
+from typing import List, Optional, Any
 import os
 import tempfile
 import logging
+
+import numpy as np
+
+
+def _to_jsonable(obj: Any) -> Any:
+    """Рекурсивно приводит numpy-типы к нативным для JSON."""
+    if isinstance(obj, dict):
+        return {k: _to_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_jsonable(v) for v in obj]
+    if isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    if isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if hasattr(obj, "item") and callable(obj.item) and type(obj).__module__ == "numpy":
+        return obj.item()
+    return obj
 
 import sys
 from pathlib import Path
@@ -16,6 +35,7 @@ if str(app_root) not in sys.path:
 
 from core.processor import DocumentPipeline
 from core.correctors import AutoCorrectionSystem
+from core.ocr_engine import OCRServerUnavailable
 from api.schemas import (
     CorrectionRequest, CorrectionResponse, ProcessingResult,
     BatchProcessingResult, CorrectionsDBResponse
@@ -74,9 +94,9 @@ async def process_document(
         
         # Обработка документа
         result = pipeline.process(temp_file, template, fields_list, selected_areas=areas_list)
-        
-        return JSONResponse(content=result)
-        
+        return JSONResponse(content=_to_jsonable(result))
+    except OCRServerUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"Ошибка при обработке документа: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка обработки: {str(e)}")
@@ -114,9 +134,9 @@ async def batch_process(files: List[UploadFile] = File(...), template: Optional[
         
         # Пакетная обработка
         result = pipeline.batch_process(temp_files, template)
-        
-        return JSONResponse(content=result)
-        
+        return JSONResponse(content=_to_jsonable(result))
+    except OCRServerUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"Ошибка при пакетной обработке: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Ошибка обработки: {str(e)}")

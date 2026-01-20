@@ -12,9 +12,8 @@ class Settings(BaseSettings):
     API_VERSION: str = "1.0.0"
     API_PREFIX: str = "/api/v1"
     
-    # OCR настройки (Vision Framework)
-    VISION_RECOGNITION_LEVEL: str = "accurate"  # "accurate" или "fast"
-    VISION_LANGUAGE_CORRECTION: bool = True  # Использовать языковую коррекцию
+    # OCR: PaddleOCR CPU в Docker (paddleocr-server), lang=ru, use_gpu=False
+    PADDLEOCR_SERVER_URL: str = "http://127.0.0.1:8080"
     
     # Пути к данным
     DATA_DIR: str = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")

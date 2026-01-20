@@ -1,6 +1,9 @@
 """Основной пайплайн обработки документов"""
 import os
+import re
+import time
 import uuid
+from collections import Counter
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 import logging
@@ -13,13 +16,33 @@ app_root = Path(__file__).parent.parent
 if str(app_root) not in sys.path:
     sys.path.insert(0, str(app_root))
 
-from core.ocr_engine import OCREngine
+from core.ocr_engine import OCREngine, OCRServerUnavailable, check_ocr_server_available
 from core.validators import FieldValidator
 from core.correctors import AutoCorrectionSystem
 from services.quality_check import QualityChecker
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _filter_ocr_junk_lines(text: str) -> str:
+    """Удаляет строки-шум: одна буква >60% строки (AAA...), повтор 12+ подряд."""
+    if not text:
+        return text
+    out = []
+    for line in text.splitlines():
+        if len(line) < 12:
+            out.append(line)
+            continue
+        c = Counter(line)
+        top = c.most_common(1)[0][1] if c else 0
+        if top > len(line) * 0.6:
+            continue  # шум вроде AAAAAAAA
+        if re.search(r"(.)\1{11,}", line):
+            continue  # один символ 12+ подряд
+        out.append(line)
+    return "\n".join(out)
+
 
 # Импорт ML компонентов (опционально, если доступны)
 try:
@@ -109,8 +132,13 @@ class DocumentPipeline:
             Результаты обработки
         """
         document_id = f"{os.path.basename(file_path)}_{uuid.uuid4().hex[:8]}"
-        
+        t_start = time.perf_counter()
+
         try:
+            if not check_ocr_server_available():
+                raise OCRServerUnavailable(
+                    "Сервер PaddleOCR недоступен (порт 8080). Запустите: ./scripts/start_paddleocr_server.sh"
+                )
             # 1. Обработка всех страниц PDF отдельно
             file_ext = os.path.splitext(file_path)[1].lower()
             
@@ -198,7 +226,8 @@ class DocumentPipeline:
                 except Exception as e:
                     logger.error(f"Ошибка при обработке выделенных областей: {str(e)}")
                     # Продолжаем обработку без выделенных областей
-            
+
+            t_ocr_start = time.perf_counter()
             if file_ext == '.pdf':
                 # Обрабатываем все страницы
                 page_results = self.ocr_engine.process_file_all_pages(file_path)
@@ -244,36 +273,53 @@ class DocumentPipeline:
                     'word_count': ocr_result.get('word_count', 0)
                 }]
                 ocr_result['total_pages'] = 1
-            
+
+            t_ocr_end = time.perf_counter()
+
             # 2.5. Добавляем текст из выделенных областей в начало
             if selected_areas_text:
                 raw_text = selected_areas_text + "\n\n--- ОСНОВНОЙ ТЕКСТ ---\n\n" + raw_text
             
-            # 3. Автокоррекция (базовая)
-            corrected_text, corrections_applied = self.corrector.correct_text(raw_text)
-            
-            # 3.5. ML исправление опечаток (если доступно)
-            # ВАЖНО: ML исправление отключено по умолчанию, так как T5 модель
-            # может портить текст при обработке OCR ошибок
-            # Используйте только для коротких, хорошо распознанных фрагментов
-            use_ml_correction = False  # Отключено по умолчанию
-            
-            if use_ml_correction and self.use_ml and self.spell_corrector:
+            # 3. Автокоррекция: Фаза 1 — только 0,8; Фаза 2/3 — ещё 3,6 в словах; Фаза 3 — extra из feedback
+            _extra = {}
+            if self.use_active_learning and self.active_learning:
+                _cand = self.active_learning.feedback_collector.get_unapplied_corrections(min_confidence=0.5, min_occurrences=1)
+                for c in _cand:
+                    o, v = c.get("original"), c.get("corrected")
+                    ctx = c.get("context") or ""
+                    # цифра в original ИЛИ правки из --learn-from-ideal (чтобы не применять вредные "в"→"8")
+                    allow = (o and v and o not in _extra and
+                             (any(ch in "0123456789" for ch in o) or "learn_from_ideal" in ctx))
+                    if allow:
+                        _extra[o] = v
+            corrected_text, corrections_applied = self.corrector.correct_text(
+                raw_text,
+                digit_replacement_extended=self.use_ml,
+                extra_corrections=_extra if _extra else None,
+            )
+            corrected_text = _filter_ocr_junk_lines(corrected_text)
+
+            # 3.5. T5 исправление опечаток по абзацам (Фаза 2 и 3). Выкл: USE_T5=0.
+            use_ml_correction = bool(
+                self.use_ml and self.spell_corrector and os.environ.get("USE_T5", "1") != "0"
+            )
+            if use_ml_correction:
                 try:
-                    # Применяем ML исправление только к коротким фрагментам
-                    # или отключено полностью для безопасности
-                    pass
-                    # ml_corrected = self.spell_corrector.correct_text(corrected_text)
-                    # if ml_corrected != corrected_text and '<extra_id' not in ml_corrected:
-                    #     corrections_applied.append({
-                    #         'from': corrected_text[:50] + '...' if len(corrected_text) > 50 else corrected_text,
-                    #         'to': ml_corrected[:50] + '...' if len(ml_corrected) > 50 else ml_corrected,
-                    #         'confidence': 0.8,
-                    #         'method': 'ml_transformer'
-                    #     })
-                    #     corrected_text = ml_corrected
+                    parts = corrected_text.split("\n\n")
+                    new_parts = []
+                    for p in parts:
+                        if p.strip() and len(p) <= 180 and p.count(" ") >= 3:
+                            t5 = self.spell_corrector.correct_text(p)
+                            if t5 != p and "<extra_id" not in (t5 or ""):
+                                new_parts.append(t5)
+                                corrections_applied.append({"from": p[:80] + ("…" if len(p) > 80 else ""), "to": (t5 or "")[:80] + ("…" if len(t5 or "") > 80 else ""), "confidence": 0.75, "method": "ml_t5_paragraph"})
+                            else:
+                                new_parts.append(p)
+                        else:
+                            new_parts.append(p)
+                    corrected_text = "\n\n".join(new_parts)
                 except Exception as e:
-                    logger.warning(f"Ошибка ML исправления: {str(e)}")
+                    logger.warning("Ошибка ML (T5) исправления: %s", e)
             
             # 4. Валидация критических полей
             validation_results = self.validator.validate_critical_fields(
@@ -341,7 +387,8 @@ class DocumentPipeline:
             
             # 5.6. Извлечение важных данных
             important_data = self.validator.extract_important_data(corrected_text)
-            
+            number_signs = re.findall(r"№\s*[\d\w\.\-/:]+", corrected_text)
+
             # 6. Формирование результата
             result = {
                 'document_id': document_id,
@@ -366,7 +413,8 @@ class DocumentPipeline:
                     'raw_text': raw_text,
                     'pages': ocr_result.get('pages', []),
                     'total_pages': ocr_result.get('total_pages', 1),
-                    'selected_areas': selected_areas_data  # Добавляем данные о выделенных областях
+                    'selected_areas': selected_areas_data,
+                    'number_signs': number_signs,
                 },
                 'total_pages': ocr_result.get('total_pages', 1),
                 'corrections_applied': corrections_applied,
@@ -374,7 +422,22 @@ class DocumentPipeline:
                                any(not r.valid for r in validation_results.values()),
                 'new_corrections_suggested': []
             }
-            
+
+            t_end = time.perf_counter()
+            n_pages = ocr_result.get('total_pages', 1)
+            result['processing_timing'] = {
+                'total_seconds': round(t_end - t_start, 2),
+                'ocr_seconds': round(t_ocr_end - t_ocr_start, 2),
+                'total_pages': n_pages,
+                'ocr_seconds_per_page': round((t_ocr_end - t_ocr_start) / max(1, n_pages), 2),
+            }
+            logger.info(
+                "Обработка %s: всего %.2f с, OCR %.2f с (%d стр., ~%.2f с/стр.)",
+                file_path, result['processing_timing']['total_seconds'],
+                result['processing_timing']['ocr_seconds'], n_pages,
+                result['processing_timing']['ocr_seconds_per_page'],
+            )
+
             # 6.5. Сбор данных для активного обучения (если включено)
             if self.use_active_learning and self.active_learning:
                 try:

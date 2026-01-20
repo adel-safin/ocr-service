@@ -1,10 +1,10 @@
 # OCR Document Processing Service
 
-Сервис для обработки документов с использованием OCR (Vision Framework), автоматической коррекции ошибок распознавания и машинного обучения.
+Сервис для обработки документов с использованием OCR (PaddleOCR CPU, lang=ru, в Docker), автоматической коррекции ошибок распознавания и машинного обучения.
 
 ## Основные возможности
 
-- **OCR распознавание** с использованием Vision Framework
+- **OCR распознавание** на PaddleOCR CPU (Docker, lang=ru, без GPU)
 - **Веб-интерфейс** для загрузки и обработки документов
 - **Выделение областей** с повышенным DPI (900) для критических участков
 - **Автокоррекция** ошибок OCR (контекстная замена 0→о/О, 8→в/В)
@@ -19,11 +19,12 @@
 
 ### Фаза 1: Базовый OCR + правила
 
-- **OCR Engine**: Vision Framework
-- **Автокоррекция**: Правила на основе регулярных выражений
+- **OCR Engine**: PaddleOCR CPU (Docker, lang=ru)
+- **Автокоррекция**: Правила (0/8 в словах), латиница→кириллица в смешанных словах (фамилии), база замен `data/corrections.json`
 - **Валидация**: Проверка критических полей (ИНН, СНИЛС, ОГРН и др.)
 - **Качество**: Детекция проблемных областей (рукописный текст, наложения)
 - **Многостраничность**: Постраничная обработка PDF
+- **Улучшение качества**: см. [OCR_IMPROVEMENTS.md](../OCR_IMPROVEMENTS.md) — датасет, скрипт извлечения пар, Фазы 2–3
 
 ### Фаза 2: Машинное обучение
 
@@ -61,10 +62,10 @@ venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 ```
 
-**Важно**: Для работы Vision Framework требуется установка `pyobjc-framework-Vision`:
+**OCR (PaddleOCR CPU)**: распознавание через HTTP в Docker (lang=ru, без GPU). Перед запуском приложения поднимите сервер (см. [PADDLEOCR_DOCKER.md](../PADDLEOCR_DOCKER.md)):
 
 ```bash
-pip install pyobjc-framework-Vision
+./scripts/start_paddleocr_server.sh
 ```
 
 ### Docker установка
@@ -301,13 +302,11 @@ python scripts/test_phase3.py
 
 ## Решение проблем
 
-### Vision Framework не работает
+### PaddleOCR / OCR не работает
 
-Убедитесь, что установлен `pyobjc-framework-Vision`:
-
-```bash
-pip install pyobjc-framework-Vision
-```
+1. Запустите Docker-сервер: `./scripts/start_paddleocr_server.sh` (см. [PADDLEOCR_DOCKER.md](../PADDLEOCR_DOCKER.md)).
+2. Проверьте: `curl -s http://127.0.0.1:8080/health` и `PADDLEOCR_SERVER_URL` в настройках.
+3. В приложении нужен только `requests` (уже в requirements.txt).
 
 ### Ошибки при обработке PDF
 

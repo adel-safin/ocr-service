@@ -3,8 +3,8 @@ uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 pydantic>=2.9.0
 pydantic-settings>=2.5.0
-# Vision Framework для macOS (заменяет Tesseract)
-pyobjc-framework-Vision>=12.0
+# OCR: HTTP-клиент к PaddleOCR CPU в Docker (paddleocr-server). Без локальных моделей.
+requests>=2.28.0
 Pillow>=10.2.0
 opencv-python>=4.8.0
 pdf2image==1.16.3

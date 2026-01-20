@@ -1,6 +1,7 @@
 """Система сбора обратной связи от пользователей"""
 import json
 import os
+import shutil
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -47,19 +48,31 @@ class FeedbackCollector:
         try:
             with open(self.feedback_db_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except Exception as e:
-            logger.error(f"Ошибка при загрузке feedback: {str(e)}")
+        except json.JSONDecodeError as e:
+            logger.error("Ошибка при загрузке feedback (битый JSON): %s", e)
+            backup = self.feedback_db_path.parent / (
+                self.feedback_db_path.name + '.broken.' + datetime.now().strftime('%Y%m%d_%H%M%S')
+            )
+            try:
+                shutil.copy2(self.feedback_db_path, backup)
+                logger.warning("Создана резервная копия: %s", backup)
+            except Exception:
+                pass
             return {
-                'corrections': [],
-                'document_types': [],
-                'quality_ratings': [],
-                'statistics': {
-                    'total_feedback': 0,
-                    'corrections_count': 0,
-                    'last_updated': None
-                }
+                'corrections': [], 'document_types': [], 'quality_ratings': [],
+                'statistics': {'total_feedback': 0, 'corrections_count': 0, 'last_updated': None}
             }
-    
+        except Exception as e:
+            logger.error("Ошибка при загрузке feedback: %s", e)
+            return {
+                'corrections': [], 'document_types': [], 'quality_ratings': [],
+                'statistics': {'total_feedback': 0, 'corrections_count': 0, 'last_updated': None}
+            }
+
+    def reload_from_disk(self) -> None:
+        """Перечитать feedback с диска (после --learn-from-ideal в другом процессе/итерации)."""
+        self.feedback_data = self._load_feedback()
+
     def _save_feedback(self):
         """Сохранение данных обратной связи"""
         try:
@@ -207,25 +220,31 @@ class FeedbackCollector:
                     'original': correction['original'],
                     'corrected': correction['corrected'],
                     'occurrences': [],
-                    'total_confidence': 0.0
+                    'total_confidence': 0.0,
+                    'context': correction.get('context') or ''
                 }
             
             correction_groups[key]['occurrences'].append(correction)
             correction_groups[key]['total_confidence'] += correction.get('confidence', 1.0)
         
-        # Фильтрация по критериям
+        # Фильтрация: обычные (min_occurrences, min_confidence) или learn_from_ideal (1+, 0.3+)
         candidates = []
         for key, group in correction_groups.items():
             count = len(group['occurrences'])
             avg_confidence = group['total_confidence'] / count if count > 0 else 0.0
-            
-            if count >= min_occurrences and avg_confidence >= min_confidence:
+            ctx = group.get('context') or ''
+            learn = 'learn_from_ideal' in ctx
+            ok = (count >= min_occurrences and avg_confidence >= min_confidence) or (
+                learn and count >= 1 and avg_confidence >= 0.3
+            )
+            if ok:
                 candidates.append({
                     'original': group['original'],
                     'corrected': group['corrected'],
                     'occurrences': count,
                     'avg_confidence': avg_confidence,
-                    'feedback_ids': [c['id'] for c in group['occurrences']]
+                    'feedback_ids': [c['id'] for c in group['occurrences']],
+                    'context': ctx
                 })
         
         # Сортировка по количеству вхождений и уверенности

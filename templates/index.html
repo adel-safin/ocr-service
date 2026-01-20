@@ -6,6 +6,11 @@
     <title>OCR Сервис - Обработка документов</title>
     <!-- PDF.js для предпросмотра PDF -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+      if (typeof pdfjsLib !== 'undefined') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+    </script>
     <style>
         * {
             margin: 0;
@@ -491,6 +496,10 @@
             </div>
             
                 <div class="results" id="results">
+                    <div class="result-section" id="timingSection" style="display: none;">
+                        <h3>⏱️ Время обработки</h3>
+                        <div id="timingInfo" class="file-info"></div>
+                    </div>
                     <div class="result-section" id="warningsSection" style="display: none;">
                         <h3>⚠️ Предупреждения</h3>
                         <div id="warningsInfo"></div>
@@ -1079,7 +1088,12 @@
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`Ошибка: ${response.statusText}`);
+                    let msg = response.statusText;
+                    try {
+                        const errJson = await response.json();
+                        if (errJson.detail) msg = errJson.detail;
+                    } catch (_) {}
+                    throw new Error(msg);
                 }
                 
                 const data = await response.json();
@@ -1093,6 +1107,24 @@
         });
         
         function displayResults(data) {
+            // Время обработки
+            const timing = data.processing_timing || {};
+            const timingEl = document.getElementById('timingInfo');
+            const timingSection = document.getElementById('timingSection');
+            if (timing.total_seconds != null) {
+                const total = timing.total_seconds;
+                const ocr = timing.ocr_seconds != null ? timing.ocr_seconds : '-';
+                const pages = timing.total_pages != null ? timing.total_pages : 1;
+                const perPage = timing.ocr_seconds_per_page != null ? timing.ocr_seconds_per_page : '-';
+                timingEl.innerHTML = '<strong>Всего:</strong> ' + total + ' с &nbsp;|&nbsp; ' +
+                    '<strong>OCR:</strong> ' + ocr + ' с &nbsp;|&nbsp; ' +
+                    '<strong>Страниц:</strong> ' + pages + ' &nbsp;|&nbsp; ' +
+                    '<strong>~ на страницу:</strong> ' + perPage + ' с';
+                timingSection.style.display = 'block';
+            } else {
+                timingSection.style.display = 'none';
+            }
+
             // Предупреждения
             const warnings = data.quality_report.warnings || [];
             const issues = data.quality_report.issues || [];

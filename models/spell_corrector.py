@@ -1,4 +1,9 @@
 """Модель исправления опечаток на основе Transformer"""
+import warnings
+
+# Убрать предупреждение T5Tokenizer legacy (если legacy=False не сработает)
+warnings.filterwarnings("ignore", message=".*[Ll]egacy.*T5Tokenizer.*")
+
 import torch
 import torch.nn as nn
 from transformers import (
@@ -48,12 +53,26 @@ class SpellCorrector:
             try:
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     model_path,
-                    use_fast=False,  # Используем медленный токенизатор для совместимости
+                    use_fast=False,
+                    legacy=False,  # убрать предупреждение T5Tokenizer, новый режим
                     local_files_only=local_path is not None
                 )
+            except TypeError:
+                # legacy нет в старых transformers
+                try:
+                    self.tokenizer = AutoTokenizer.from_pretrained(
+                        model_path,
+                        use_fast=False,
+                        local_files_only=local_path is not None
+                    )
+                except Exception as e:
+                    logger.warning(f"Токенизатор use_fast=False: {e}")
+                    self.tokenizer = AutoTokenizer.from_pretrained(
+                        model_path,
+                        local_files_only=local_path is not None
+                    )
             except Exception as e:
-                logger.warning(f"Не удалось загрузить токенизатор с use_fast=False: {str(e)}")
-                # Попытка загрузить без параметра use_fast
+                logger.warning(f"Токенизатор: {e}")
                 self.tokenizer = AutoTokenizer.from_pretrained(
                     model_path,
                     local_files_only=local_path is not None
@@ -91,10 +110,8 @@ class SpellCorrector:
         # Вместо этого используем простой исправитель для коротких текстов
         # или отключаем ML исправление для длинных текстов
         
-        # Если текст слишком длинный или содержит много ошибок OCR, 
-        # лучше использовать базовые правила
-        if len(text) > 200 or text.count(' ') < 5:
-            logger.debug("Текст слишком длинный или короткий для ML исправления, используем базовые правила")
+        if len(text) > 200 or text.count(' ') < 2:
+            logger.debug("Текст слишком длинный или слишком короткий для ML исправления")
             return text
         
         try:

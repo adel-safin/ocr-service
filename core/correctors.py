@@ -1,6 +1,7 @@
 """Система автокоррекции текста"""
 import json
 import os
+import re
 from typing import Dict, List, Tuple, Optional
 from difflib import SequenceMatcher
 import logging
@@ -16,6 +17,12 @@ if str(app_root) not in sys.path:
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Латиница → кириллица (типичные OCR-ошибки: фамилии, инициалы). Не трогать в @, доменах.
+_LATIN_TO_CYRILLIC = str.maketrans(
+    "aecopxyABCEHKMOPTXYIisGNPlL",
+    "аесорхуАВСЕНКМОРТХУИисГНРлЛ",
+)
 
 
 class AutoCorrectionSystem:
@@ -41,11 +48,8 @@ class AutoCorrectionSystem:
             os.makedirs(os.path.dirname(corrections_path), exist_ok=True)
             default_corrections = {
                 "Маркуталь": "Мариуполь",
-                "О": "0",  # Частая ошибка: буква O вместо нуля
-                "I": "1",  # Буква I вместо единицы
-                "З": "3",  # Буква З вместо тройки
-                "Б": "6",  # Буква Б вместо шестерки
-                "В": "8",  # Буква В вместо восьмерки
+                "I": "1",
+                "E-ma1l": "E-mail",
             }
             self.save_corrections(default_corrections)
             return default_corrections
@@ -197,52 +201,89 @@ class AutoCorrectionSystem:
             True если слово содержит русские буквы
         """
         return any(self.is_russian_char(c) for c in word)
-    
-    def correct_text(self, text: str) -> Tuple[str, List[Dict[str, any]]]:
+
+    def _fix_latin_in_russian_words(self, text: str) -> Tuple[str, List[Dict]]:
+        """Замена латиницы на кириллицу в словах с примесью кириллицы (фамилии, инициалы). Не трогает @ и домены."""
+        fixes = []
+        _skip_domain = (".ru", ".com", ".org", ".net", ".рф")
+
+        def repl(m):
+            w = m.group(0)
+            if "@" in w or any(s in w for s in _skip_domain) or not any(self.is_russian_char(c) for c in w):
+                return w
+            latin_src = "aecopxyABCEHKMOPTXYIisGNPlL"
+            if not any(c in w for c in latin_src):
+                return w
+            new = w.translate(_LATIN_TO_CYRILLIC)
+            if new != w:
+                fixes.append({"from": w, "to": new, "confidence": 0.9, "method": "latin_to_cyrillic"})
+                return new
+            return w
+
+        out = re.sub(r"\w+", repl, text)
+        return out, fixes
+
+    def correct_text(
+        self,
+        text: str,
+        *,
+        digit_replacement_extended: bool = False,
+        extra_corrections: Optional[Dict[str, str]] = None,
+    ) -> Tuple[str, List[Dict[str, any]]]:
         """
-        Автокоррекция текста с умной заменой цифр на буквы внутри русских слов
-        
-        Args:
-            text: Исходный текст
-            
-        Returns:
-            Кортеж (исправленный текст, список примененных исправлений)
+        Автокоррекция: 0) extra_corrections (Фаза 3), 1) точные из базы, 2) латиница→кириллица,
+        3) 0/8 (и при digit_replacement_extended — 3, 6) в русских словах, 4) похожие из базы.
         """
         corrections_applied = []
         corrected_text = text
-        
-        # Сначала применяем умные правила для замены цифр на буквы внутри русских слов
+
+        # 0) Доп. замены (напр. из активного обучения, Фаза 3)
+        _extras = extra_corrections or {}
+        for k in sorted(_extras, key=len, reverse=True):
+            if k and k in corrected_text:
+                corrected_text = corrected_text.replace(k, _extras[k])
+                corrections_applied.append({"from": k, "to": _extras[k], "confidence": 0.85, "method": "extra_corrections"})
+
+        # Исключаем однобуквенные О,В,З,Б — они портят русские слова (цифра→буква делается в п.3)
+        _skip = {"О", "В", "З", "Б", "з"}
+
+        # 1) Точные замены из базы (длинные первыми)
+        for k in sorted(self.corrections_db, key=len, reverse=True):
+            if k in _skip and len(k) == 1:
+                continue
+            if k in corrected_text:
+                corrected_text = corrected_text.replace(k, self.corrections_db[k])
+                corrections_applied.append({"from": k, "to": self.corrections_db[k], "confidence": 1.0, "method": "exact_match"})
+
+        # 2) Латиница → кириллица в смешанных словах
+        corrected_text, lat_fixes = self._fix_latin_in_russian_words(corrected_text)
+        corrections_applied.extend(lat_fixes)
+
+        # 3) 0→о/О, 8→в/В; при digit_replacement_extended ещё 3→з/З, 6→б/Б в русских словах
+        digit_extended = digit_replacement_extended
         import re
-        
-        # Паттерн для поиска слов целиком (последовательности букв и цифр)
-        # Ищем слова, которые содержат русские буквы И цифры 0 или 8
-        # Используем более точный паттерн, который захватывает все слово целиком
         word_pattern = re.compile(r'\b[А-Яа-яЁё0-9]+\b')
-        
+
         def replace_digits_in_russian_word(match):
             word = match.group(0)
             original_word = word
-            
-            # Заменяем 0 на о/О и 8 на в/В только если слово содержит русские буквы
-            # И проверяем, что это не чисто число (должны быть русские буквы)
-            # И есть хотя бы одна цифра 0 или 8
-            if (self.is_russian_word(word) and 
-                not word.isdigit() and 
-                ('0' in word or '8' in word)):
-                
-                # Определяем регистр: если все буквы заглавные, используем заглавные замены
-                has_lowercase = any(c.islower() for c in word if c.isalpha())
-                use_uppercase = not has_lowercase and any(c.isupper() for c in word if c.isalpha())
-                
-                # Заменяем с учетом регистра
-                if use_uppercase:
-                    # Все буквы заглавные - используем заглавные замены
-                    new_word = word.replace('0', 'О').replace('8', 'В')
-                else:
-                    # Есть строчные буквы или смешанный регистр - используем строчные замены
-                    new_word = word.replace('0', 'о').replace('8', 'в')
-                
-                if new_word != original_word:
+            has_digit = '0' in word or '8' in word or (digit_extended and ('3' in word or '6' in word))
+            if not (self.is_russian_word(word) and not word.isdigit() and has_digit):
+                return word
+
+            has_lowercase = any(c.islower() for c in word if c.isalpha())
+            use_uppercase = not has_lowercase and any(c.isupper() for c in word if c.isalpha())
+
+            if use_uppercase:
+                new_word = word.replace('0', 'О').replace('8', 'В')
+                if digit_extended:
+                    new_word = new_word.replace('3', 'З').replace('6', 'Б')
+            else:
+                new_word = word.replace('0', 'о').replace('8', 'в')
+                if digit_extended:
+                    new_word = new_word.replace('3', 'з').replace('6', 'б')
+
+            if new_word != original_word:
                     # Подсчитываем замены для отчета
                     zero_count = word.count('0')
                     eight_count = word.count('8')
